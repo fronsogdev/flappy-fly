@@ -6,11 +6,21 @@ independently of any concrete physics backend.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 
 from flappy_fly.bridge import FlapLatch, sensors_to_I_ext, spikes_to_flaps
-from flappy_fly.physics.base import Obs
+from flappy_fly.connectome import make_synthetic_gf, population_slices
+from flappy_fly.physics.base import Obs, PhysicsBackend
+from flappy_fly.physics.mujoco_env import MujocoPhysics
+from flappy_fly.physics.numpy2d import NumPyPhysics
+from flappy_fly.snn import LIFNetwork
+
+#: Same convention as ``tests/test_snn.py``: the synthetic GF connectome needs
+#: this multiplier for the sensory -> GF -> motor pathway to fire.
+W_SCALE_GF = 20.0
 
 
 def test_sensors_to_i_ext_monotonic() -> None:
@@ -138,3 +148,85 @@ def test_backend_agnostic_bridge() -> None:
     assert np.array_equal(expected[0], [1.0, 0.0])
     assert np.array_equal(expected[1], [0.0, 0.0])
     assert np.array_equal(expected[2], [0.0, 1.0])
+
+
+def _run_closed_loop(
+    backend: PhysicsBackend,
+    net: LIFNetwork,
+    G: np.ndarray,
+    motor_ids: np.ndarray,
+    steps: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Drive ``backend`` through the bridge for ``steps`` SNN ticks.
+
+    Touches only the ``PhysicsBackend`` protocol (``reset``/``step``/``K``), so a
+    concrete backend and a delegated mock are exercised identically. Returns the
+    ``(steps, 2)`` flap action sequence and the ``(steps, K + 3)`` observation
+    sequence (distances, altitude, vy, alive) it produced.
+    """
+    latch = FlapLatch()
+    net.reset()
+    obs = backend.reset(seed=0)
+    flaps_seq = np.zeros((steps, 2), dtype=float)
+    obs_seq = np.zeros((steps, backend.K + 3), dtype=float)
+    for t in range(steps):
+        I_ext = sensors_to_I_ext(obs.distances, G)
+        spikes = net.step(I_ext)
+        flaps = spikes_to_flaps(spikes, motor_ids, latch)
+        latch.advance(net.dt)
+        flaps_seq[t] = flaps
+        obs_seq[t, : backend.K] = obs.distances
+        obs_seq[t, backend.K] = obs.altitude
+        obs_seq[t, backend.K + 1] = obs.vy
+        obs_seq[t, backend.K + 2] = float(obs.alive)
+        obs = backend.step(flaps)
+    return flaps_seq, obs_seq
+
+
+def test_backend_swap_action_sequence() -> None:
+    """Same SNN, seed and bridge must behave identically through both backends.
+
+    ``MujocoPhysics`` cannot run on this CPU, so its interface is exercised with
+    a ``MagicMock(spec=MujocoPhysics)`` whose ``reset``/``step`` delegate to a
+    real ``NumPyPhysics``. That tests backend-agnosticism of the game loop -- the
+    action sequence and observations must not depend on the backend -- without
+    importing mujoco.
+    """
+    data = make_synthetic_gf(64, seed=0)
+    sl = population_slices(64)
+    W_signed = data.W * data.sign[:, None] * W_SCALE_GF
+    net = LIFNetwork(W_signed)
+
+    G = np.zeros((net.N, NumPyPhysics.K), dtype=float)
+    # ~2x threshold current per unit threat, so a near obstacle drives the
+    # sensory block and the sensory -> GF -> motor path emits flaps.
+    G[sl["sensory"], :] = 2.0e-10
+
+    motor_idx = np.arange(sl["motor"].start, sl["motor"].stop)
+    half = motor_idx.size // 2  # floor-split so both rows share a width
+    motor_ids = np.array([motor_idx[:half], motor_idx[half : 2 * half]])
+
+    # 2000 SNN ticks (~0.2 s of SNN time); each call advances the physics tick.
+    steps = 2000
+
+    flaps_numpy, obs_numpy = _run_closed_loop(NumPyPhysics(), net, G, motor_ids, steps)
+
+    inner = NumPyPhysics()
+    backend_mujoco = MagicMock(spec=MujocoPhysics)
+    backend_mujoco.name = "mujoco"
+    backend_mujoco.K = inner.K
+    backend_mujoco.reset.side_effect = inner.reset
+    backend_mujoco.step.side_effect = inner.step
+    flaps_mujoco, obs_mujoco = _run_closed_loop(
+        backend_mujoco, net, G, motor_ids, steps
+    )
+
+    # (a) identical wing-command sequence...
+    assert np.array_equal(flaps_numpy, flaps_mujoco)
+    # (b) ...and identical observation sequence.
+    assert np.array_equal(obs_numpy, obs_mujoco)
+    # (c) the closed loop actually produced output on both backends.
+    assert int(flaps_numpy.any(axis=1).sum()) >= 1
+    assert int(flaps_mujoco.any(axis=1).sum()) >= 1
+    # (d) sanity: the real MuJoCo backend is unavailable on this CPU.
+    assert MujocoPhysics.available() is False
