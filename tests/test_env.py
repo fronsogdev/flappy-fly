@@ -73,24 +73,21 @@ def test_no_top_level_mujoco_or_flygym_imports() -> None:
     assert not offenders, "top-level physics imports found: " + "; ".join(offenders)
 
 
-def test_pyproject_declares_extras() -> None:
+def test_pyproject_manifest_is_exact() -> None:
     with (REPO_ROOT / "pyproject.toml").open("rb") as fh:
         data = tomllib.load(fh)
 
     project = data["project"]
     assert project["name"] == "flappy-fly"
+    assert project["requires-python"] == ">=3.12"
 
-    base_deps = [d.lower() for d in project["dependencies"]]
-    assert any("numpy" in d for d in base_deps), base_deps
-    assert any("scipy" in d for d in base_deps), base_deps
+    assert "numpy>=2" in project["dependencies"]
+    assert "scipy" in project["dependencies"]
 
-    extras = {
-        name: [d.lower() for d in deps]
-        for name, deps in project["optional-dependencies"].items()
-    }
-    assert "physics" in extras
-    assert any("mujoco" in d for d in extras["physics"])
-    assert any("flygym" in d for d in extras["physics"])
+    extras = project["optional-dependencies"]
+    assert "mujoco>=3.9,<3.10" in extras["physics"]
+    assert "flygym>=2.1" in extras["physics"]
+    assert "pytest>=9" in extras["dev"]
 
-    assert "dev" in extras
-    assert any("pytest" in d for d in extras["dev"])
+    assert data["tool"]["pytest"]["ini_options"]["testpaths"] == ["tests"]
+    assert data["build-system"]["build-backend"] == "setuptools.build_meta"
