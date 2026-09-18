@@ -184,6 +184,30 @@ def test_fixture_row_sum_validation(tmp_path: Path) -> None:
     assert np.array_equal(legacy.W, data.W)
 
 
+def test_fixture_rejects_invalid_w_max(tmp_path: Path) -> None:
+    data = make_synthetic_gf(64, seed=0)
+
+    # NaN would bypass `rowsums > row_w_max`; it must be rejected explicitly.
+    nan_path = save_adjacency(data, tmp_path / "nan_w_max.npz", w_max=float("nan"))
+    with pytest.raises(ValueError):
+        load_adjacency(source="fixture", fixture_path=nan_path)
+
+    # Negative bounds are nonsensical and must be rejected too.
+    neg_path = save_adjacency(data, tmp_path / "neg_w_max.npz", w_max=-1.0)
+    with pytest.raises(ValueError):
+        load_adjacency(source="fixture", fixture_path=neg_path)
+
+    # The programmatic path (no npz involved) must enforce the same rule.
+    with pytest.raises(ValueError):
+        _validate_adjacency(data, row_w_max=float("nan"))
+
+    # Sanity: a valid bound still loads when row sums respect it.
+    valid_data = make_synthetic_gf(64, seed=0, w_max=0.5)
+    valid_path = save_adjacency(valid_data, tmp_path / "valid_w_max.npz", w_max=0.5)
+    loaded = load_adjacency(source="fixture", fixture_path=valid_path)
+    assert loaded.W.sum(axis=1).max() <= 0.5 + 1e-6
+
+
 def _forbid_socket(*args: object, **kwargs: object) -> None:
     raise AssertionError("no network in tests")
 
