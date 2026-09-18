@@ -164,12 +164,18 @@ def make_synthetic_gf(
         ids=(SYNTHETIC_ID_BASE + np.arange(n_neurons, dtype=np.int64)),
         sign=sign,
     )
-    _validate_adjacency(data)
+    _validate_adjacency(data, row_w_max=w_max)
     return data
 
 
-def _validate_adjacency(data: AdjacencyData) -> None:
-    """Raise :class:`ValueError` if ``data`` violates the adjacency contract."""
+def _validate_adjacency(data: AdjacencyData, row_w_max: float = 1.0) -> None:
+    """Raise :class:`ValueError` if ``data`` violates the adjacency contract.
+
+    ``row_w_max`` bounds every presynaptic row sum: ``rowsum(W[i, :]) <=
+    row_w_max + 1e-6``. The synthetic and FlyWire paths pass their own
+    ``w_max``; the fixture path passes the value stored in the npz (default
+    ``1.0`` for old fixtures that predate the key).
+    """
     W, ids, sign = data.W, data.ids, data.sign
     if W.ndim != 2 or W.shape[0] != W.shape[1]:
         raise ValueError(f"W must be square (N, N), got shape {W.shape}")
@@ -194,13 +200,18 @@ def _validate_adjacency(data: AdjacencyData) -> None:
         raise ValueError("ids must be unique")
     if np.any((sign < -1) | (sign > 1)):
         raise ValueError("sign entries must be in {-1, 0, 1}")
+    rowsums = W.sum(axis=1)
+    if np.any(rowsums > row_w_max + 1e-6):
+        raise ValueError(
+            f"row sums must be <= w_max ({row_w_max}) + 1e-6, got max {rowsums.max()}"
+        )
 
 
-def save_adjacency(data: AdjacencyData, path: Path) -> Path:
-    """Write ``W``, ``ids`` and ``sign`` to ``path`` (``np.savez``) and return it."""
+def save_adjacency(data: AdjacencyData, path: Path, w_max: float = 1.0) -> Path:
+    """Write ``W``, ``ids``, ``sign`` and ``w_max`` to ``path`` (``np.savez``)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(path, W=data.W, ids=data.ids, sign=data.sign)
+    np.savez(path, W=data.W, ids=data.ids, sign=data.sign, w_max=np.float64(w_max))
     return path
 
 
@@ -214,12 +225,14 @@ def _default_fixture_path() -> Path:
 
 def _load_fixture(path: Path) -> AdjacencyData:
     with np.load(path) as npz:
+        # ``w_max`` is absent in fixtures saved before it was recorded.
+        w_max = float(npz["w_max"]) if "w_max" in npz else 1.0
         data = AdjacencyData(
             W=np.asarray(npz["W"], dtype=np.float32).copy(),
             ids=np.asarray(npz["ids"], dtype=np.int64).copy(),
             sign=np.asarray(npz["sign"], dtype=np.int8).copy(),
         )
-    _validate_adjacency(data)
+    _validate_adjacency(data, row_w_max=w_max)
     return data
 
 
@@ -301,7 +314,7 @@ def _load_flywire(n_neurons: int, w_max: float = 1.0) -> AdjacencyData:
         ids=selected.astype(np.int64),
         sign=_sign_from_annotations(client, selected).astype(np.int8),
     )
-    _validate_adjacency(data)
+    _validate_adjacency(data, row_w_max=w_max)
     return data
 
 
