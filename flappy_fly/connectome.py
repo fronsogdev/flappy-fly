@@ -200,6 +200,15 @@ def _validate_adjacency(data: AdjacencyData, row_w_max: float = 1.0) -> None:
         raise ValueError("ids must be unique")
     if np.any((sign < -1) | (sign > 1)):
         raise ValueError("sign entries must be in {-1, 0, 1}")
+    if (
+        not isinstance(row_w_max, (int, float, np.integer, np.floating))
+        or not np.isfinite(row_w_max)
+        or row_w_max < 0
+    ):
+        raise ValueError(
+            f"invalid w_max in fixture metadata: expected a finite value >= 0, "
+            f"got {row_w_max!r}"
+        )
     rowsums = W.sum(axis=1)
     if np.any(rowsums > row_w_max + 1e-6):
         raise ValueError(
