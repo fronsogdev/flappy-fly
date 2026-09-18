@@ -200,15 +200,21 @@ def _validate_adjacency(data: AdjacencyData, row_w_max: float = 1.0) -> None:
         raise ValueError("ids must be unique")
     if np.any((sign < -1) | (sign > 1)):
         raise ValueError("sign entries must be in {-1, 0, 1}")
+    raw_w_max = row_w_max
+    if isinstance(raw_w_max, np.ndarray) and raw_w_max.ndim == 0:
+        # ``np.savez`` stores a scalar as a 0-d array; unwrap only that form so
+        # genuine arrays (and complex/string metadata) still fail the check.
+        raw_w_max = raw_w_max.item()
     if (
-        not isinstance(row_w_max, (int, float, np.integer, np.floating))
-        or not np.isfinite(row_w_max)
-        or row_w_max < 0
+        not isinstance(raw_w_max, (int, float, np.integer, np.floating))
+        or not np.isfinite(raw_w_max)
+        or raw_w_max < 0
     ):
         raise ValueError(
             f"invalid w_max in fixture metadata: expected a finite value >= 0, "
             f"got {row_w_max!r}"
         )
+    row_w_max = float(raw_w_max)
     rowsums = W.sum(axis=1)
     if np.any(rowsums > row_w_max + 1e-6):
         raise ValueError(
@@ -234,8 +240,11 @@ def _default_fixture_path() -> Path:
 
 def _load_fixture(path: Path) -> AdjacencyData:
     with np.load(path) as npz:
-        # ``w_max`` is absent in fixtures saved before it was recorded.
-        w_max = float(npz["w_max"]) if "w_max" in npz else 1.0
+        # ``w_max`` is absent in fixtures saved before it was recorded. Keep the
+        # raw value: ``_validate_adjacency`` owns the scalar/finite/non-negative
+        # check, so coercing here would turn array/complex metadata into a
+        # TypeError before that check could raise its ValueError.
+        w_max = npz["w_max"] if "w_max" in npz else 1.0
         data = AdjacencyData(
             W=np.asarray(npz["W"], dtype=np.float32).copy(),
             ids=np.asarray(npz["ids"], dtype=np.int64).copy(),
