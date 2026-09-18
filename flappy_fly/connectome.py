@@ -33,6 +33,11 @@ one so that all-zero rows stay zero, then scaled to ``w_max``::
 
 Every row sum is therefore ``<= w_max`` (exactly ``w_max`` for nonzero rows).
 
+Autapses
+--------
+Self-synapses (``W[i, i]``) are excluded: :func:`make_synthetic_gf` zeroes the
+diagonal before normalization, so a neuron never projects onto itself.
+
 Fixture-first policy
 --------------------
 The default ``source`` is ``"fixture"``: a committed
@@ -130,8 +135,10 @@ def make_synthetic_gf(
     ``p_base``, uniform ``[0, 1]`` weights), overlaid with the escape pathway:
     sensory->GF strong (weights 3-6, p=0.5), GF->motor strong (4-8, p=0.7),
     sensory->motor weak/sparse (0.2-1, p=0.15). GF->sensory is explicitly
-    silenced. Signs are presynaptic: sensory ~90% excitatory, GF 100%,
-    interneurons ~70%, motor ~80%. Fully deterministic from ``seed`` via
+    silenced. Autapses (self-synapses) are excluded: the matrix diagonal is
+    zeroed before normalization, so ``W[i, i] == 0`` for every neuron. Signs
+    are presynaptic: sensory ~90% excitatory, GF 100%, interneurons ~70%,
+    motor ~80%. Fully deterministic from ``seed`` via
     ``np.random.default_rng``; ids are ``SYNTHETIC_ID_BASE + arange(N)``.
     """
     if n_neurons < MIN_NEURONS or n_neurons > MAX_NEURONS:
@@ -144,6 +151,7 @@ def make_synthetic_gf(
     _overlay(W, sl["gf"], sl["motor"], rng, p=0.7, lo=4.0, hi=8.0)
     _overlay(W, sl["sensory"], sl["motor"], rng, p=0.15, lo=0.2, hi=1.0)
     W[sl["gf"], sl["sensory"]] = 0.0  # GF does not project back to sensory
+    W[np.diag_indices(n_neurons)] = 0.0  # no autapses (self-synapses)
 
     sign = np.full(n_neurons, -1, dtype=np.int8)
     _assign_sign(sign, sl["sensory"], 0.9, rng)
