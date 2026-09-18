@@ -51,7 +51,18 @@ echo "mujoco: $MUJOCO_STATUS"
 echo "==> summary"
 echo "python: $("$VENV_PY" --version 2>&1)"
 if "$VENV_PY" -c "import flappy_fly" >/dev/null 2>&1; then
-    echo "flappy_fly: import OK (version $("$VENV_PY" -c 'import flappy_fly; print(flappy_fly.__version__)'))"
+    FLAPPY_VERSION="$("$VENV_PY" -c '
+import importlib.metadata
+try:
+    print(importlib.metadata.version("flappy-fly"))
+except importlib.metadata.PackageNotFoundError:
+    pass
+' 2>/dev/null)"
+    if [ -n "$FLAPPY_VERSION" ]; then
+        echo "flappy_fly: import OK (version $FLAPPY_VERSION)"
+    else
+        echo "flappy_fly: import OK"
+    fi
 else
     echo "flappy_fly: import FAILED"
 fi
