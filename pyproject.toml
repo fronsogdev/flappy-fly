@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flappy-fly"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2",
+    "scipy",
+]
+
+[project.optional-dependencies]
+physics = [
+    "mujoco>=3.9,<3.10",
+    "flygym>=2.1",
+]
+dev = [
+    "pytest>=9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["flappy_fly*"]
