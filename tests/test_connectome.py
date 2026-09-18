@@ -148,6 +148,42 @@ def test_default_fixture_loads() -> None:
     assert data.sign.dtype == np.int8
 
 
+def test_no_autapses() -> None:
+    for n, seed in ((20, 0), (64, 1), (64, 7), (100, 42)):
+        W = make_synthetic_gf(n, seed=seed).W
+        assert np.array_equal(W.diagonal(), np.zeros(n, dtype=W.dtype))
+
+    fixture = load_adjacency(source="fixture")
+    assert np.array_equal(
+        fixture.W.diagonal(), np.zeros(fixture.W.shape[0], dtype=fixture.W.dtype)
+    )
+
+
+def test_fixture_row_sum_validation(tmp_path: Path) -> None:
+    # The committed fixture still loads under the new row-sum check.
+    assert load_adjacency(source="fixture").W.shape[0] > 0
+
+    data = make_synthetic_gf(64, seed=0)
+    bad_W = data.W.copy()
+    bad_W[0, 1] = 5.0  # row 0 now sums well above w_max=1.0
+    assert bad_W[0].sum() > 1.0 + 1e-6
+    bad = AdjacencyData(W=bad_W, ids=data.ids, sign=data.sign)
+    bad_path = save_adjacency(bad, tmp_path / "malformed.npz", w_max=1.0)
+
+    with pytest.raises(ValueError):
+        load_adjacency(source="fixture", fixture_path=bad_path)
+
+    # An npz without a w_max key is treated as w_max=1.0 (backward compatible).
+    np.savez(
+        tmp_path / "legacy.npz",
+        W=data.W,
+        ids=data.ids,
+        sign=data.sign,
+    )
+    legacy = load_adjacency(source="fixture", fixture_path=tmp_path / "legacy.npz")
+    assert np.array_equal(legacy.W, data.W)
+
+
 def _forbid_socket(*args: object, **kwargs: object) -> None:
     raise AssertionError("no network in tests")
 
