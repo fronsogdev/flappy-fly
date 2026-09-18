@@ -208,6 +208,25 @@ def test_fixture_rejects_invalid_w_max(tmp_path: Path) -> None:
     assert loaded.W.sum(axis=1).max() <= 0.5 + 1e-6
 
 
+@pytest.mark.parametrize(
+    "bad_w_max",
+    [
+        np.array([0.5]),            # genuine array, not an np.savez 0-d scalar
+        np.complex128(1.0 + 0.5j),  # complex is not a real scalar
+        "0.5",                      # string metadata
+    ],
+)
+def test_fixture_rejects_non_scalar_w_max(tmp_path: Path, bad_w_max: object) -> None:
+    data = make_synthetic_gf(64, seed=0)
+    path = tmp_path / "bad_w_max.npz"
+    np.savez(path, W=data.W, ids=data.ids, sign=data.sign, w_max=bad_w_max)
+
+    # The fixture loader must surface the clear metadata ValueError, not the
+    # TypeError that a pre-validation float() coercion would raise.
+    with pytest.raises(ValueError, match="invalid w_max in fixture metadata"):
+        load_adjacency(source="fixture", fixture_path=path)
+
+
 def _forbid_socket(*args: object, **kwargs: object) -> None:
     raise AssertionError("no network in tests")
 
